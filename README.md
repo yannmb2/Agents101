@@ -22,7 +22,19 @@ Based on the result, either confirm the answer or flag it as unreliable.
 ```bash
 poetry install
 ```
+
 ## How to run it ? 
 ```bash
 poetry run python .\main.py
+```
+
+## How to create vector database and retrieve ? 
+```bash
+poetry run python .\mistral_rag.py
+```
+
+## ⚠️ Il faut configurer un fichier .env
+```texte
+MISTRAL_API_KEY = put_your_api_key_here
+
 ```
