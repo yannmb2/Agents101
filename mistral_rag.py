@@ -43,6 +43,12 @@ SYSTEM_PROMPT = (
     "Si la réponse est manquante, dis \"Je ne sais pas.\""
 )
 
+SYSTEM_PROMPT_CHECK = (
+    "Is the following answer well-supported by the provided context? Answer yes or no, and justify briefly in french"
+)
+
+
+
 api_key = os.getenv("MISTRAL_API_KEY")
 assert api_key, "👉  Veuillez définir MISTRAL_API_KEY dans votre fichier .env!"
 
@@ -210,6 +216,103 @@ def chat_loop(index, chunks: List[str]):
             
             print("🤖  Réponse:\n")
             print(textwrap.fill(answer, width=88))
+            
+            # Mise à jour de l'historique avec la question simple et la réponse
+            history.extend([
+                {"role": "user", "content": q},
+                {"role": "assistant", "content": answer},
+            ])
+            
+            # Limitation de l'historique pour éviter des contextes trop longs
+            if len(history) > 10:  # Garde les 5 derniers échanges
+                history = history[-10:]
+                
+        except Exception as e:
+            print(f"❌  Erreur lors de l'appel à Mistral: {e}")
+            continue
+
+# 6️⃣  Chat loop with history -------------------------------------------------
+def chat_loop_with_check(index, chunks: List[str]):
+    """Boucle de chat interactive avec nœud de vérification."""
+    history: List[Dict[str, str]] = []  # stocke les tours précédents
+    
+    print("\n🎯  RAG avec Mistral AI activé (avec nœud de vérification)!")
+    print("   Tapez votre question ou Ctrl-C pour quitter")
+    
+    while True:
+        try:
+            q = input("\n💬  Question: ").strip()
+            if not q:
+                continue
+                
+        except KeyboardInterrupt:
+            print("\n👋  Au revoir!")
+            break
+
+        # Récupération du contexte pertinent
+        ctx = retrieve(q, index, chunks)
+        user_prompt = build_user_prompt(q, ctx)
+
+        # Construction des messages pour l'API
+        messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+        messages.extend(history)
+        messages.append({"role": "user", "content": user_prompt})
+
+        # Affichage du contexte récupéré (transparence)
+        print("\n🔍  Contexte récupéré:")
+        print("─" * 80)
+        for i, c in enumerate(ctx, 1):
+            # Troncature pour l'affichage
+            display_chunk = c[:200] + "..." if len(c) > 200 else c
+            print(f"[Doc {i}] {display_chunk}")
+        print("─" * 80)
+
+        try:
+            # Appel à l'API Mistral pour la réponse principale
+            response = client.chat.complete(
+                model=CHAT_MODEL,
+                messages=messages,
+                temperature=0.2,
+                max_tokens=1000
+            )
+            
+            answer = response.choices[0].message.content
+            
+            # === NŒUD DE VÉRIFICATION ===
+            context_for_check = "\n\n".join(ctx)
+            verification_prompt = (
+                f"Context:\n{context_for_check}\n\n"
+                f"Answer to verify:\n{answer}\n\n"
+                f"Is this answer well-supported by the provided context?"
+            )
+            
+            # Appel au nœud de vérification
+            response_check = client.chat.complete(
+                model=CHAT_MODEL,
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT_CHECK},
+                    {"role": "user", "content": verification_prompt}
+                ],
+                temperature=0.1,  # Plus strict pour la vérification
+                max_tokens=200
+            )
+            
+            verification_result = response_check.choices[0].message.content.lower()
+            
+            # Analyse du résultat de vérification
+            is_reliable = "yes" in verification_result or "oui" in verification_result
+            
+            # Affichage avec flag de fiabilité
+            if is_reliable:
+                print("🤖  Réponse (✅ Vérifiée):\n")
+                print(textwrap.fill(answer, width=88))
+            else:
+                print("🤖  Réponse (⚠️  NON FIABLE - Contexte insuffisant):\n")
+                print(textwrap.fill(answer, width=88))
+                print("\n❌  ATTENTION: Cette réponse pourrait ne pas être bien supportée par les documents fournis.")
+            
+            print(f"\n🔍  Analyse de vérification: {response_check.choices[0].message.content}")
+            print()
             
             # Mise à jour de l'historique avec la question simple et la réponse
             history.extend([
